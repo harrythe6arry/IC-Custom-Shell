@@ -1,0 +1,13 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "C/C++ Runner: Debug Session",
+      "type": "lldb",
+      "request": "launch",
+      "args": [],
+      "cwd": "/Users/harrysingh/Desktop/CS_101/uni/yr2/Term 2 2023/PCSA/project-1-ic-shell-harrythe6arry",
+      "program": "/Users/harrysingh/Desktop/CS_101/uni/yr2/Term 2 2023/PCSA/project-1-ic-shell-harrythe6arry/build/Debug/outDebug"
+    }
+  ]
+}
