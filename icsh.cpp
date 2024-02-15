@@ -1,110 +1,134 @@
 #include <iostream>
 #include <string>
-#include <fstream>
+#include <cstring>
 #include <unistd.h>
+#include <fstream>
+#include <sys/wait.h>
+#include <csignal>
 using namespace std;
 
+const int MAX_ARGS = 256;
+volatile pid_t currentchild = -1;
+int exitCode = 0;
 
-const int MAX_ARGS = 1024;
 void executeEcho(const string& input) {
-    cout << input.substr(5) << endl; 
+    cout << input.substr(5) << endl;
 }
 
 int execExit(const string& input) {
-    int numexit = 0; 
-    if (input.size() > 5) {
-        numexit = stoi(input.substr(5)) & 0xFF;
-    }
+    int numexit = stoi(input.substr(5)) & 0xFF;
     return numexit;
 }
 
+void ignore_signals() {
+    signal(SIGINT, SIG_IGN);
+    signal(SIGTSTP, SIG_IGN);
+}
+void default_signals() {
+    signal(SIGINT, SIG_DFL);
+    signal(SIGTSTP, SIG_DFL);
+}
 
-
-void executeShell(istream& user_input, bool user_mode, int& exitCode) {
+void executeShell(istream& user_input, bool user_mode) {
     string input, last_input = "";
-    exitCode = 0; 
+    ignore_signals(); 
+
     while (true) {
         if (user_mode) {
             cout << "X SHELL $ ";
-            if (!getline(cin, input)) {
-                cout << "bye" << endl;
-                break; 
-            }
-        } else {
-            if (!getline(user_input, input)) {
-                break;
-            }
+            fflush(stdout);
         }
-        if (input.empty()) continue; 
+        if (!getline(user_input, input)) {
+            if (user_input.eof()) {
+                cout << "End of file reached or bye" << endl; 
+            } else {
+                cout << "Input error or bye" << endl; // For unexpected errors
+            }
+            break;
+        }
+
+        if (input.empty()) continue;
+
         if (input == "!!") {
             if (!last_input.empty()) {
-                input = last_input; 
-                cout << input << endl; 
+                input = last_input;
+                if (user_mode) {
+                    cout << input << endl;
+                }
+                exitCode = 0;
             } else {
                 cout << "No commands in history." << endl;
+                exitCode = 0;
                 continue;
             }
         } else {
-            last_input = input; 
+            last_input = input;
         }
-        if (input.substr(0, 2) == "##") continue; 
-        if (input.substr(0, 4) == "echo") {
-            executeEcho(input); 
+
+        if (input.substr(0, 2) == "##") continue; // I'm assuming this is a comment line, ignore it.
+
+        if (input.substr(0, 5) == "echo ") {
+            if (input == "echo $?") {
+                cout << "The exit code is " << exitCode << endl;
+                exitCode = 0;
+            } else {
+                executeEcho(input);
+            }
         } else if (input.substr(0, 4) == "exit") {
             exitCode = execExit(input);
-            if (exitCode == 0 || !user_mode) {
-                cout << "Bye, Have a nice day!" << "\n"; 
-                break;
-            } else {
-                cout << "Exit code: " << exitCode << endl;
-            }
-            
+            cout << "Exiting with code: " << exitCode << endl;
+            exit(exitCode);
         } else {
-            char *new_str = new char[input.length() + 1]; // create a new char array
-            strncpy(new_str, input.c_str(), input.length() + 1); // copy the string to the char array
-            char *p = strtok(new_str, " "); // split the string by space
-            char *args[MAX_ARGS];
+            char* args[MAX_ARGS];
+            char* new_str = new char[input.length() + 1];
+            strcpy(new_str, input.c_str());
+            char* p = strtok(new_str, " ");
             int i = 0;
-            while (p != 0) { // loop through the string
+            while (p != NULL) {
                 args[i++] = p;
-                p = strtok(NULL, " "); // split the string by space
+                p = strtok(NULL, " ");
             }
             args[i] = NULL;
-            pid_t pid = fork();
-            if (pid == -1) {
-                cerr << "Fork is not working.." << endl;
-                execExit("exit 1");
-            } else if (pid == 0) {
-                execvp(args[0], args);
-                cout << "bad command" << "\n"; 
-                execExit("exit 1");
+
+            currentchild = fork();
+            if (currentchild == -1) {
+                cerr << "Fork failed." << endl;
+            } else if (currentchild == 0) {
+                default_signals(); // Restore default signal behavior for the child process
+                if (execvp(args[0], args) == -1) {
+                    cerr << "bad command" << endl;
+                    exit(EXIT_FAILURE);
+                }
             } else {
-                int status;
-                waitpid(pid, &status, 0);   
+               int status;
+                waitpid(currentchild, &status, WUNTRACED);
+                if (WIFEXITED(status) && WTERMSIG(status) == SIGINT) {
+                    exitCode = 0; 
+                    // cout << "The process was terminated" << exitCode << endl; 
+                } else if (WIFSTOPPED(status) && WSTOPSIG(status) == SIGTSTP) { // Check if the process was stopped by SIGTSTP
+                    exitCode = 146;
+                    // cout << "The process has entered the background." << exitCode << endl; 
+                }
+                currentchild = -1;
             }
+            delete[] new_str;
         }
-    } 
+    }
 }
 
 int main(int argc, char* argv[]) {
-
-    cout << "Starting the XSHELL.." << endl; 
-    int exitCode = 0;
+    cout << "Starting the XSHELL.." << endl;
     if (argc > 1) {
         ifstream fileStream(argv[1]);
         if (!fileStream) {
-            cerr << "Cannot open this file!" << endl;
-            return 1;  
+            cerr << "Cannot open file: " << argv[1] << endl;
+            return 1;
         }
-        executeShell(fileStream, false, exitCode);
-        fileStream.close(); 
-    }  
-    else {
-    executeShell(cin, true, exitCode);
-    cout << "bye" << endl;
-    return exitCode;
+        executeShell(fileStream, false);
+        fileStream.close();
+    } else {
+        executeShell(cin, true);
     }
-
+    cout << "Bye, See you soon :X" << endl;
     return 0;
 }
-
