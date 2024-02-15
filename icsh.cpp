@@ -5,6 +5,11 @@
 #include <fstream>
 #include <sys/wait.h>
 #include <csignal>
+#include <cstdlib>
+#include <errno.h>
+#include <sys/types.h>
+#include <fcntl.h>
+
 using namespace std;
 
 const int MAX_ARGS = 256;
@@ -29,6 +34,40 @@ void default_signals() {
     signal(SIGTSTP, SIG_DFL);
 }
 
+
+// implmement the I/O redirection 
+
+void handleIO(char* args[], bool &input, bool&output) {
+    int in;
+    int out; 
+
+    for (int i = 0; args[i] != NULL; i++) {
+        if (strcmp(args[i], "<") == 0) {
+            input = true;
+            args[i] = NULL;
+            in = open(args[i + 1], O_RDONLY);
+            if (in < 0) {
+                cerr << "Error: " << strerror(errno) << endl;
+                exit(errno);
+            }
+            dup2(in, STDIN_FILENO);
+            close(in);
+            i++; 
+        } else if (strcmp(args[i], ">") == 0) {
+            output = true;
+            args[i] = NULL;
+            out = open(args[i + 1], O_WRONLY | O_CREAT | O_TRUNC, 0666);
+            if (out == -1) {
+                cerr << "Error: " << strerror(errno) << endl;
+                exit(errno);
+            }
+            dup2(out, STDOUT_FILENO);
+            close(out);
+            i++;
+        }
+    }
+}
+
 void executeShell(istream& user_input, bool user_mode) {
     string input, last_input = "";
     ignore_signals(); 
@@ -46,9 +85,7 @@ void executeShell(istream& user_input, bool user_mode) {
             }
             break;
         }
-
         if (input.empty()) continue;
-
         if (input == "!!") {
             if (!last_input.empty()) {
                 input = last_input;
@@ -64,9 +101,7 @@ void executeShell(istream& user_input, bool user_mode) {
         } else {
             last_input = input;
         }
-
         if (input.substr(0, 2) == "##") continue; // I'm assuming this is a comment line, ignore it.
-
         if (input.substr(0, 5) == "echo ") {
             if (input == "echo $?") {
                 cout << "The exit code is " << exitCode << endl;
@@ -77,6 +112,7 @@ void executeShell(istream& user_input, bool user_mode) {
         } else if (input.substr(0, 4) == "exit") {
             exitCode = execExit(input);
             cout << "Exiting with code: " << exitCode << endl;
+            cout << "Bye, See you soon :X" << endl;
             exit(exitCode);
         } else {
             char* args[MAX_ARGS];
@@ -88,20 +124,32 @@ void executeShell(istream& user_input, bool user_mode) {
                 args[i++] = p;
                 p = strtok(NULL, " ");
             }
+            
             args[i] = NULL;
+            bool input = false;
+            bool output = false;
 
-            currentchild = fork();
-            if (currentchild == -1) {
+            // should be in the child process
+            // handleIO(args, input, output); 
+
+            currentchild = fork();// Create a new process
+            if (currentchild == -1) {// Check if the fork failed
                 cerr << "Fork failed." << endl;
             } else if (currentchild == 0) {
                 default_signals(); // Restore default signal behavior for the child process
+                handleIO(args, input, output);
+
+
                 if (execvp(args[0], args) == -1) {
                     cerr << "bad command" << endl;
                     exit(EXIT_FAILURE);
                 }
+
             } else {
                int status;
                 waitpid(currentchild, &status, WUNTRACED);
+                
+
                 if (WIFEXITED(status) && WTERMSIG(status) == SIGINT) {
                     exitCode = 0; 
                     // cout << "The process was terminated" << exitCode << endl; 
@@ -109,7 +157,9 @@ void executeShell(istream& user_input, bool user_mode) {
                     exitCode = 146;
                     // cout << "The process has entered the background." << exitCode << endl; 
                 }
+
                 currentchild = -1;
+
             }
             delete[] new_str;
         }
@@ -117,7 +167,9 @@ void executeShell(istream& user_input, bool user_mode) {
 }
 
 int main(int argc, char* argv[]) {
+
     cout << "Starting the XSHELL.." << endl;
+
     if (argc > 1) {
         ifstream fileStream(argv[1]);
         if (!fileStream) {
@@ -126,9 +178,12 @@ int main(int argc, char* argv[]) {
         }
         executeShell(fileStream, false);
         fileStream.close();
-    } else {
+    }
+    else {
         executeShell(cin, true);
     }
     cout << "Bye, See you soon :X" << endl;
     return 0;
 }
+
+
