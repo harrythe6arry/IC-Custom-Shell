@@ -20,7 +20,7 @@ int bg_count = 0;
 pid_t bg_processes[MAX_BG];
 bool externalecho = false; // special condition for echo 
 string bg_commands[MAX_BG];
-
+volatile bool job_track[MAX_BG] = {false};
 
 void executeEcho(const string& input) {
     cout << input.substr(5) << endl;
@@ -79,39 +79,76 @@ void handleIO(char* args[], bool &input_redir, bool&output_redir) {
     }
 }
 
-
-
+void completejobs(pid_t pid, int status) {
+  for (int i = 0; i < bg_count; i++) {
+    if (bg_processes[i] == pid) {
+      cout << "\n[" << i + 1 << "]  Done                 " << bg_commands[i] << endl;
+      bg_processes[i] = 0;
+      bg_commands[i] = "";
+      cout << "X SHELL $ ";
+      fflush(stdout);
+    }
+  }
+}
 void sigchild(int signum) {
-  int saved_errno = errno; // Save the current value of errno
+  int saved_value = errno; 
   pid_t pid;
   int status;
   while ((pid = waitpid((pid_t)(-1), &status, WNOHANG)) > 0) {
-    // Find the job in the background jobs list
-    for (int i = 0; i < bg_count; i++) {
-    if (bg_processes[i] == pid) {
-    // Job has completed
-      cout << "\n[" << i + 1 << "]  Done                 " << bg_commands[i] << endl;
-      // Mark this job as completed or remove it from the list
-      bg_processes[i] = 0;
-      bg_commands[i] = "";
-      cout << "X SHELL $ "; // returns to priniting the shell prompt
-      fflush(stdout); // flush the output buffer, to return to the shell prompt
-      break;
-    }
-    }
+    completejobs(pid, status);
   }
-    errno = saved_errno;
-}
 
+  errno = saved_value; 
+}
 
 void listjobs() {
   for (int i = 0; i < bg_count; i++) {
-    if (bg_processes[i] != 0) {
-      cout << "[" << i + 1 << "] Running       " << bg_processes[i] << " " << bg_commands[i] << endl;
+    if (bg_processes[i] == 0) { // no jobs are running
+      cout << "No jobs are running" << endl;
+    }
+    else { // jobs are running
+      cout << "[" << i + 1 << "] Running                  " << " " << bg_commands[i] << "&" <<endl;
     }
   }
-
 }
+
+void foreground_job(int job_id) {
+  if (job_id < 0 || job_id >= bg_count) {
+    cerr << "Invalid job ID" << endl;
+    return;
+  }
+  pid_t pid = bg_processes[job_id];
+  if (pid == 0) {
+    cerr << "No such job" << endl;
+    return;
+  }
+  int status;
+  cout << "Foreground process " << pid << " started" << endl;
+  cout << bg_commands[job_id] << endl;
+  kill(pid, SIGCONT);
+  waitpid(pid, &status, WUNTRACED);
+  cout << "Foreground process " << pid << " exited with status " << status << endl;
+  if (WIFEXITED(status)) {
+    completejobs(pid, status);
+  }
+}
+
+// void backgroundjobs(int job_id) {
+//   if (job_id < 0 || job_id >= bg_count) {
+//     cerr << "Invalid job ID" << endl;
+//     return;
+//   }
+//   pid_t pid = bg_processes[job_id];
+//   if (pid == 0) {
+//     cerr << "No such job" << endl;
+//     return;
+//   }
+//   int status;
+//   cout << "Background process " << pid << " started" << endl;
+//   cout << bg_commands[job_id] << endl;
+//   kill(pid, SIGCONT);
+//   job_track[job_id] = true;
+// }
 
 
 void executeShell(istream& user_input, bool user_mode) {
@@ -131,6 +168,22 @@ void executeShell(istream& user_input, bool user_mode) {
             break;
         }
     if (input.empty()) continue;
+
+    
+    if (input.rfind("fg ", 0) == 0) {
+    string job_id_str = input.substr(input.find('%') + 1);
+    int job_id = -1;
+    try {
+        job_id = stoi(job_id_str) - 1; // Convert job ID from string to int, adjust for 0-based indexing
+        foreground_job(job_id);
+    } catch (const invalid_argument& e) {
+        cerr << "Invalid job ID format" << endl;
+    } catch (const out_of_range& e) {
+        cerr << "Job ID out of range" << endl;
+    }
+    continue; // Skip to the next iteration of the loop
+}
+
 
     bool have_bg = false;
     if (input.back() == '&') {
@@ -169,6 +222,20 @@ void executeShell(istream& user_input, bool user_mode) {
               }
           }
         }
+
+        // if (input.rfind("bg ", 0) == 0) {
+        //   string job_id_str = input.substr(input.find('%') + 1);
+        //   int job_id = -1;
+        //   try {
+        //       job_id = stoi(job_id_str) - 1; // Convert job ID from string to int, adjust for 0-based indexing
+        //       backgroundjobs(job_id);
+        //   } catch (const invalid_argument& e) {
+        //       cerr << "Invalid job ID format" << endl;
+        //   } catch (const out_of_range& e) {
+        //       cerr << "Job ID out of range" << endl;
+        //   }
+        //   continue; // Skip to the next iteration of the loop
+        // }
          else if (input.substr(0, 4) == "exit") {
           exitCode = execExit(input);
           cout << "Exiting with code: " << exitCode << endl;
@@ -191,8 +258,6 @@ void executeShell(istream& user_input, bool user_mode) {
             bool input_redir = false; // Set to true if input redirection is used
             bool output_redir = false; // Set to true if output redirection is used
 
-            // should be in the child process
-            // handleIO(args, input, output); 
 
             currentchild = fork();// Create a new process
             if (currentchild == -1) {// Check if the fork failed
@@ -224,6 +289,7 @@ void executeShell(istream& user_input, bool user_mode) {
                 }
                 else {
                   if (have_bg) {
+                  // signal(SIGCHLD, sigchild);
                   bg_processes[bg_count] = currentchild;
                   bg_commands[bg_count] = input;
                   cout << "[" << bg_count + 1 << "] " << currentchild << endl;
