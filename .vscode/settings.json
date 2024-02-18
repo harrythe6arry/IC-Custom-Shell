@@ -60,6 +60,8 @@
     "iostream": "cpp",
     "ostream": "cpp",
     "istream": "cpp",
-    "ios": "cpp"
+    "ios": "cpp",
+    "string": "cpp",
+    "string_view": "cpp"
   }
 }

@@ -1,0 +1,8 @@
+total 272
+-rw-rw-r--@ 1 harrysingh  staff     136 Feb  7 07:45 Makefile
+-rw-r--r--  1 harrysingh  staff     529 Feb  7 19:45 README.md
+-rwxr-xr-x  1 harrysingh  staff  107896 Feb 18 21:12 icsh
+-rw-r--r--@ 1 harrysingh  staff   12780 Feb 18 21:12 icsh.cpp
+drwxr-xr-x@ 3 harrysingh  staff      96 Jan 18 07:49 icsh.dSYM
+-rw-r--r--@ 1 harrysingh  staff       0 Feb 18 21:12 somefile
+-rw-r--r--  1 harrysingh  staff      76 Feb 16 14:08 test.sh
